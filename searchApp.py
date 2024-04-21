@@ -60,36 +60,51 @@ def search(input_query, genre=None):
     query_tfidf = movie_tfidf_model[bow_input]
     query_lsi = movie_lsi_model[query_tfidf]
 
-    movie_index.num_best = 50
+    movie_index.num_best = 20
 
     movies_list = movie_index[query_lsi]
-
-    # Filter movies based on genre and relevance score
-    if genre is not None:
-        movies_list = [movie for movie in movies_list if (
-            re.search(genre, data['Genre'][movie[0]], re.IGNORECASE) or movie[1] > 0.8)]
 
     movies_list.sort(key=itemgetter(1), reverse=True)
     movie_names = []
 
     for j, movie in enumerate(movies_list):
+        wiki_url = data['Wiki Page'][movie[0]]
+        movie_title = data['Title'][movie[0]]
+        poster_url = None
+        # poster_url = get_poster_url(wiki_url, movie_title)
+
 
         movie_names.append(
             {
+                'Movie Title': movie_title,
                 'Relevance': round((movie[1] * 100), 2),
-                'Movie Title': data['Title'][movie[0]],
-                'Movie Plot': data['Plot'][movie[0]],
                 'Genre': data['Genre'][movie[0]],
-                'Wikipedia Link': data['Wiki Page'][movie[0]]
+                'Wikipedia Link': wiki_url,
+                'Poster Link': poster_url
             }
 
         )
         if j == (movie_index.num_best-1):
             break
 
-    return pd.DataFrame(movie_names, columns=['Relevance', 'Movie Title', 'Genre', 'Wikipedia Link'])
+    return pd.DataFrame(movie_names, columns=['Relevance', 'Movie Title', 'Genre', 'Wikipedia Link', 'Poster Link'])
 # -------------------------------------------------------
 
+from bs4 import BeautifulSoup
+import requests
+
+def get_poster_url(wiki_url, movie_title):
+    response = requests.get(wiki_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    soup = soup.find_all('a', href=True)
+    for link in soup:
+        if any(word in link['href'] for word in movie_title.split()):
+            return link['href']
+            break
+
+    
+    return None
 
 start_time = time.time()
 
@@ -98,18 +113,21 @@ def main():
     st.title('Movies Search Engine')
 
     search_query = st.text_input("Enter your search query")
-    genre = st.selectbox("Select a genre", options=genres, placeholder="All")
 
     results = None  # Initialize results outside the if block
 
-    if st.button("Search"):
-        results = search(search_query, genre)
+    if st.button("Search") or search_query:
+        with st.spinner(text='In progress'):
+            results = search(search_query)
+            st.success('Done') 
+
 
     if results is not None and not results.empty:
-        results['Link_Markdown'] = results.apply(
-            lambda row: f"[Wikipedia Link]({row['Wikipedia Link']})", axis=1)
-        html_table = results.to_html(escape=False, index=False)
-        st.write(html_table, unsafe_allow_html=True)
+        st.dataframe(results , column_config={
+            'Relevance': {'format': '{:.2f}%'},
+            'Wikipedia Link': st.column_config.LinkColumn("wiki page"),
+            'Poster Link' : st.column_config.ImageColumn("Poster")
+        })
     elif results is None:
         st.warning("Press the 'Search' button to find results.")
     else:
